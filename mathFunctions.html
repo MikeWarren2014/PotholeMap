@@ -1,0 +1,49 @@
+<script>
+/* Add recursive sum function to native Math class
+ * Arguments:
+ *	• x1, ..., xn : finite list of numbers or list of containers of numbers 
+ * returns :
+ *	• sum of all numbers
+ */
+Math.sum = function() {
+	var sum = 0;
+    for (var j in arguments)
+    {
+    	if ((typeof arguments[j] === 'object') || (typeof arguments[j] === 'Array')) 
+        {
+        	for (var k in arguments[j]) sum += Math.sum(arguments[j][k]);
+        }
+    	else sum += arguments[j];
+    }
+    return sum;
+}
+
+/* Add avg function to native Math class
+ * Arguments: 
+ *	• x1, ..., xn : finite list of numbers
+ * Returns: 
+ *	• average of all numbers, or 0 if no numbers specified
+ */
+Math.avg = function() { 
+	return arguments.length ? Math.sum(arguments) / countNumbers(arguments) : 0;
+}
+
+/* returns amount of numbers in object(s)
+ * Arguments:
+ *	• x1, ..., xn : finite list of numbers (or objects containing numbers)
+ * Returns:
+ *	• amount of numbers in arguments
+ */
+function countNumbers() { 
+	var count = 0; 
+    for (var j in arguments)
+    {
+    	if ((typeof arguments[j] === 'object') || (typeof arguments[j] === 'Array'))
+        {
+        	for (var k in arguments[j]) count += countNumbers(arguments[j][k]);
+        }
+        else count += 1;
+    }
+    return count; 
+}
+</script>

@@ -1,0 +1,9 @@
+<div>
+	<span class="rowTight">Status: <b>{{potholeState.toString}}</b></span>
+	{{#area}}<span class="rowTight">Surface area: <b>{{area}}</b> square feet</span>{{/area}}
+	{{#bagsNeeded}}
+		{{#isFilled}}<span class="rowTight">Volume : <b>{{volume}}</b> cubic feet</span>{{/isFilled}}
+		{{^isFilled}}<span class="rowTight">Bags needed: <b>{{bagsNeeded}}</b></span>{{/isFilled}}
+	{{/bagsNeeded}}
+	{{#imageURL}}<span class="rowTight">Image: <img src="{{imageURL}}" class="potholeImage"></span>{{/imageURL}}
+</div>

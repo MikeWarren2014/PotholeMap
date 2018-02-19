@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <script 
+    	type="text/javascript" 
+        src="https://maps.googleapis.com/maps/api/js?libraries=places,geocoding,geometry&key=AIzaSyCcjfkPZ0EfqZnyJrOZ3cuqdAWTFlXmFxM"
+        async defer></script>
+    <script 
+    	src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js">
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mustache.js/0.7.0/mustache.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/async@2.5.0/dist/async.min.js"></script>
+    <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+    <!--<script src="https://google-developers.appspot.com/_static/js/jquery-bundle.js"></script>-->
+    <script src="//code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+    <?!= include('mathFunctions'); ?>
+    <?!=// include('Pothole'); ?>
+    <?!= include('JavaScript'); ?>
+    <?!= include('stylesheet'); ?>
+  </head>
+  <body>
+	<div id="toggleHidden" class="floatingMenu">&mdash;</div>
+	<div id="legend" class="floatingMenu">
+		<span class="center row title">Legend</span>
+		<!-- the different icons and states of potholes -->
+        <div>
+        
+        
+        </div>
+	</div>
+    <div id="map">
+    
+    </div>
+  </body>
+</html>
+
+

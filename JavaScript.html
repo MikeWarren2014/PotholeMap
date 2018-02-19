@@ -1,0 +1,745 @@
+<script>
+var API_KEY = "[your Google Maps API key here]";
+// Icons for markers
+/* obtained from tutorial https://developers.google.com/maps/documentation/roads/inspector */
+var RED_MARKER    = 'https://maps.google.com/mapfiles/ms/icons/red-dot.png';
+var GREEN_MARKER  = 'https://maps.google.com/mapfiles/ms/icons/green-dot.png';
+var BLUE_MARKER   = 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png';
+var YELLOW_MARKER = 'https://maps.google.com/mapfiles/ms/icons/yellow-dot.png';
+var PURPLE_MARKER = 'https://maps.google.com/mapfiles/ms/icons/purple-dot.png';
+var ORANGE_MARKER = 'https://maps.google.com/mapfiles/ms/icons/orange-dot.png';
+
+// the different pothole states
+// NOTE: objects go right after each other
+var POTHOLE_STATES = {
+	NEEDS_MEASURED : { toString : function() { return 'needs measured'; }, iconURL : YELLOW_MARKER },
+    NEEDS_INSPECTED: { toString : function() { return 'needs inspected'; }, iconURL : ORANGE_MARKER },
+	NEEDS_FILLED   : { toString : function() { return 'needs filled'; }, iconURL : RED_MARKER },
+	FILLED         : { toString : function() { return 'filled'; }, iconURL : BLUE_MARKER }/*,
+	// additional code, for Mustache.js purposes
+    n              : -1,
+    m              : -1,
+    objIndices     : [],
+    countObjects   : function() { 
+    	var objCount = 0;
+        var j = 0;
+    	for (var key in this) {
+        	if ((typeof this[key] === 'object') && (!Array.isArray(this[key])))
+            {
+            	this.objIndices.push(j);
+            	objCount++;
+            }
+            j++;
+        }
+        return objCount;
+    },
+    nextObject     : function() { 
+		var DEBUG = false;
+    	// advance n to the next index in objIndices, or back to -1 if no more indices
+        if (DEBUG) { 
+			console.log('m == ' + this.m);
+            console.log('n == ' + this.n);
+
+		}
+        if ((this.m < (this.objIndices.length == 0 ? this.countObjects() : this.objIndices.length)) && 
+        	(this.n <= (this.m == -1 ? -1 : this.objIndices[this.m]))) 
+        { 
+        	if (this.m + 1 == this.objIndices.length) { 
+            	this.m = -1;
+                this.n = -1;
+            }
+            else
+            {
+            	this.n = this.objIndices[++this.m];
+            }
+        }
+        if (this.n == -1) return null;
+    	return this[Object.keys(this)[this.n]];
+        
+    },
+    currentObject   : function() { 
+    	return this[Object.keys(this)[this.n]];
+    }
+            */
+};
+
+var INDY_CENTER = { 'lat' : 39.7684, 'lng' : -86.1581 }	// coordinates for the center of Indianapolis, IN
+
+var map;
+
+var infoWindows    = new PotholeCollectionObject([],
+	[],
+    [],
+    []),
+    potholeMarkers = new PotholeCollectionObject([],
+	[],
+    [],
+    []);
+
+// potholeAddresses,potholeCoordinates to be populated with server data (including data on the potholes themselves)
+var potholeAddresses   = new PotholeCollectionObject([],
+	[],
+    [],
+    []
+    ),
+	potholeCoordinates = new PotholeCollectionObject([],
+    [],
+    [],
+    []
+    ); 
+var defaultMapOptions = {
+	center : INDY_CENTER,
+    zoom   : 14
+};
+var mapOptions = {
+	center : INDY_CENTER, 
+    zoom   : 16
+};
+
+/* Function that initializes a pothole collection object.
+ * Parameters: 
+ *	• toBeMeasured : an Array of coordinates (or locations) of potholes to be measured
+ *	• toBeInspected: an Array of coordinates (or locations) of potholes to be inspected
+ *	• toBeFilled   : an Array of coordinates (or locations) of potholes to be filled
+ *	• filled       : an Array of coordinates (or locations) of potholes that are filled
+ * Returns:
+ *	• an object that contains the arrays specified by the arguments
+ */
+function PotholeCollectionObject(toBeMeasured, toBeInspected, toBeFilled, filled)
+{
+	// verify that all the parameters are arrays or things that are falsy (null, undefined, false, ...)
+    if ((toBeMeasured) &&(!Array.isArray(toBeMeasured))) return null;
+    if ((toBeInspected) && (!Array.isArray(toBeInspected))) return null;
+    if ((toBeFilled) && (!Array.isArray(toBeFilled))) return null;
+    if ((filled) && (!Array.isArray(filled))) return null;
+    // build this
+    this.toBeMeasured  = (toBeMeasured === undefined) ? [] : toBeMeasured;
+    this.toBeInspected = (toBeInspected === undefined) ? [] : toBeInspected;
+    this.toBeFilled    = (toBeFilled === undefined) ? [] : toBeFilled;
+    this.filled        = (filled === undefined) ? [] : filled;
+}
+/* Determines whether or not PotholeCollectionObject is empty 
+ * Parameters: none
+ * returns:
+ *	• true if the array members of this are all empty, or false otherwise
+ */
+PotholeCollectionObject.prototype.isEmpty = function() { 
+	for (var key in this)
+	{
+    	if ((Array.isArray(this[key])) && (this[key].length > 0)) return false;
+    }
+    return true;
+}
+
+/* Map of POTHOLE_STATES to PotholeCollectionObject members, for convenience */
+var statesMap = new Map();
+statesMap.set(POTHOLE_STATES.NEEDS_MEASURED, 'toBeMeasured');
+statesMap.set(POTHOLE_STATES.NEEDS_INSPECTED, 'toBeInspected');
+statesMap.set(POTHOLE_STATES.NEEDS_FILLED, 'toBeFilled');
+statesMap.set(POTHOLE_STATES.FILLED, 'filled');
+
+function GPSCoordinates(latitude, longitude)
+{
+	// casting a plain Google Maps API location object to this
+	if (latitude.lat !== undefined) 
+    {
+    	longitude = latitude.lng;
+        latitude = latitude.lat;
+    }
+    if (latitude.latitude !== undefined)
+    {
+    	longitude = latitude.longitude;
+        latitude = latitude.latitude;
+    }
+        
+    
+	latitude = parseFloat(latitude) || INDY_CENTER.latitude;
+    longitude = parseFloat(longitude) || INDY_CENTER.longitude;
+    
+	this.lat = latitude;
+    this.lng = longitude;
+    
+    // for good measure; // snapToRoads API returns object that has latitude,longitude 
+	this.latitude = latitude;
+    this.longitude = longitude;
+
+	this.toString = function() 
+    { 
+    	return '(' +  Math.abs(this.lat) + '°' + ((this.lat > 0) ? 'N' : 'S') + ', ' + 
+        	Math.abs(this.lng) + '°' + ((this.lng > 0) ? 'E' : 'W') + ')';
+    }
+}
+
+/* Function that determines the state of a pothole
+ * Parameters:
+ *	• potholeData : the PotholeData (or PotholeDataFromCoords) object
+ * Returns :
+ *	• the member of POTHOLE_STATES for the PotholeData
+ */
+function getPotholeStateFor(potholeData)
+{
+	// check parameters before using them
+    
+    // if the pothole has been filled 
+    if (potholeData.isFilled)
+    	// we return state for that
+        return POTHOLE_STATES.FILLED;
+    // if there's no surface area data or volume data for this pothole
+    if ((!potholeData.area) && (!potholeData.bagsNeeded))
+    	// the pothole needs to be measured
+        return POTHOLE_STATES.NEEDS_MEASURED;
+    // if there's no volume data for this pothole (maybe or imageURL)
+    if ((!potholeData.bagsNeeded) && (!potholeData.imageURL))
+    	// the pothole needs to be inspected
+    	return POTHOLE_STATES.NEEDS_INSPECTED;
+    return POTHOLE_STATES.NEEDS_FILLED;
+}
+
+
+/* code was initially obtained from https://developers.google.com/maps/documentation/roads/inspector */
+/* Adds marker to map.
+ * Parameters : 
+ *	• potholeData  : a PotholeData (or PotholeDataFromCoords) object
+ *	• snappedToRoad: boolean
+ *	• callback     : the function to call next (optional)
+ * Returns : 
+ *	• the marker that was added to the map, or null if arguments invalid, or callback() if it was provided
+ */
+function addPotholeMarker(potholeData, snappedToRoad, callback) {
+  // make sure that callback is either falsy or a function
+  if ((callback) && (typeof callback !== 'function')) throw new TypeError('callback specified but not a function. Thrown from addPotholeMarker()'); 
+  // make sure potholeState is either falsy or contains iconURL string
+  if ((!potholeData.potholeState) || ((potholeData.potholeState) && (potholeData.potholeState.iconURL === undefined))) throw new Error('invalid potholeData');
+  // let's make sure to snap this to road if it isn't already...  
+  var coords = new GPSCoordinates(potholeData.lat, potholeData.lng);
+  if (!snappedToRoad) 
+  { 
+    var potholeMarker = 'a garbage return value';
+  	getRoadCoordinates(coords).done(function(response) {
+    	var coords = response.snappedPoints[0].location;
+        potholeData.lat = coords.latitude;
+        potholeData.lng = coords.longitude;
+        potholeData.isSnappedToRoad(true);
+        return (potholeMarker = addPotholeMarker(potholeData, true, callback));
+    });
+    if (callback) return callback(null);
+    return; 
+  }
+  var marker = new google.maps.Marker({
+    position: coords,
+    title: coords.toString(),
+    map: map,
+    opacity: 0.5,
+    icon: ((potholeData.potholeState.iconURL !== undefined) ? potholeData.potholeState.iconURL : PURPLE_MARKER)
+  });
+  
+  // make marker have effect when mouseout,mouseover
+  marker.addListener('mouseover', function(mouseEvent) {
+   	marker.setOpacity(1.0);
+  });
+  marker.addListener('mouseout', function(mouseEvent) {
+    marker.setOpacity(0.5);
+    
+  });
+  
+  var infoWindow = createInfoWindow(potholeData);
+  // save infoWindow for later reference
+  infoWindows[statesMap.get(getPotholeStateFor(potholeData))].push(infoWindow);
+  // on click of marker, show infoWindow
+  marker.addListener('click', function(mouseEvent) { 
+  	infoWindow.open(map, marker);
+  });
+  // add this to potholeMarkers
+  potholeMarkers[statesMap.get(getPotholeStateFor(potholeData))].push(marker);  
+  if (callback) return callback(null, marker);
+  return marker;
+}
+
+/* Creates InfoWindow for potholeData 
+ * Parameters:
+ *	• potholeData : the data to use for the template
+ * Returns:
+ *	• the infoWindow
+ */
+function createInfoWindow(potholeData)
+{
+	// create an InfoWindow object
+  /*var template = '';
+  var templateLoad = $.get('potholeInfoWindowTemplate.html', function (data) {
+  	template = data;
+  });
+  templateLoad.complete(function() { 
+  	var infoWindowContent = Mustache.to_html(template, potholeData);
+    console.log(infoWindowContent);
+  });*/
+  // Google Apps Script won't let us asynchronously get the template HTML, so we hardcode it here, directly in a variable.
+  var template = '<div>' + 
+	'<span class="rowTight">Status: <b>{{potholeState.toString}}</b></span>' + 
+	'{{#area}}<span class="rowTight">Surface area: <b>{{area}}</b> square feet</span>{{/area}}' + 
+	'{{#bagsNeeded}}' + 
+		'{{#isFilled}}<span class="rowTight">Volume : <b>{{volume}}</b> cubic feet</span>{{/isFilled}}' + 
+        '{{^isFilled}}<span class="rowTight">Bags needed: <b>{{bagsNeeded}}</b></span>{{/isFilled}}' + 
+	'{{/bagsNeeded}}' + 
+	'{{#imageURL}}<span class="rowTight">Image: <img src="{{imageURL}}" class="potholeImage"></span>{{/imageURL}}' + 
+  '</div>';
+  var infoWindowContent = Mustache.to_html(template, potholeData);
+  var infoWindow = new google.maps.InfoWindow({
+  	content: infoWindowContent
+  });
+  return infoWindow;
+}
+
+/* snaps the coordinates to the nearest road
+ * Parameters:
+ *	• coords : coordinates object`
+ * Returns: 
+ *	• coordinates, snapped to road 
+ * NOTE: the points you're looking for are accessible via the snappedPoints member of the returned object (in done() or success()) 
+ */
+function getRoadCoordinates(coords)
+{
+	return $.ajax({
+    	type: 'get',
+        url : 'https://roads.googleapis.com/v1/snapToRoads',
+        data: { 
+        	key : API_KEY,
+            interpolate : true,
+            path : coords.lat + ', ' + coords.lng
+        }
+     });
+}
+ 
+
+/* Clears the map */
+function clearMap()
+{
+	// to clear the map means to remove the map from all the markers on it...
+    for (var j in potholeMarkers)
+    {
+    	for (var k in potholeMarkers[j])
+        {
+    		potholeMarkers[j][k].setMap(null);
+		}
+    }
+    // ...and to close all the InfoWindows
+    for (var j in infoWindows)
+    {
+    	for (var k in infoWindows[j])
+        {
+        	infoWindows[j][k].close();
+        }
+    }
+    
+    // clear all arrays
+    potholeMarkers = new PotholeCollectionObject();
+    infoWindows = new PotholeCollectionObject();
+}
+
+/* gets the GPS coordinates for a street address 
+ * Parameters: 
+ *	• address : string
+ * Returns:
+ *	• jQuery XMLHTTPRequest object that the user can get the coordinates from using .done(), and then inside that, accessing the results[0].geometry.location
+ * NOTE: This function is for testing of concept, primarily. If you were to do this for real, you would use the placeID for the address, obtained via Google 
+ *	autocomplete field, and use that to get the coordinates.
+ */
+function getGPSCoordinates(address)
+{
+	var coords, responseData;
+    var cityState = 'Indianapolis, IN';
+    return $.ajax({
+    	type   : 'get',
+        url    : 'https://maps.googleapis.com/maps/api/geocode/json',
+        data   : {
+        	key    : API_KEY,
+            address: (address.indexOf(cityState) !== -1) ? 
+            	address : 
+                address + ', ' + cityState
+        }/*,
+        success: function(data) {
+        	responseData = data;
+            coords = responseData.results[0].geometry.location;
+            return coords;
+        },
+        failure: function(err) { 
+        
+        }*/
+    });
+    //return coords;
+}
+
+/* re-centers the map
+ * NOTE: re-centering is done based on potholeMarkers. If empty, center will default to INDY_CENTER
+ * TODO: refactor this function to accept PotholeCollectionObject, Array<PotholeData>, Array<google.map.Marker>, ...; // basically Array<ObjWithCoords>
+ */
+function adjustMap()
+{
+	var center = INDY_CENTER;
+    // if potholeMarkers is not array of empty elements
+    var potholeMarkersIsEmpty = true;
+    for (var key in potholeMarkers) {
+    	if (potholeMarkers[key].length > 0)
+        {
+        	potholeMarkersIsEmpty = false; 
+            break;
+        }
+        
+    }
+    if (!potholeMarkersIsEmpty) {
+    	// get all positions of all potholeMarkers
+        var potholePositions = $.map(potholeMarkers, function(element, index) { 
+        	return $.map(element, function(elem, i) { 
+            	return elem.position;
+            });
+        });
+        // take the average of all the positions and set it as the new position
+        var latitudes = $.map(potholePositions, function (element, index) { return element.lat(); }),
+        	longitudes = $.map(potholePositions, function (element, index) { return element.lng(); });
+        var latMin = Math.min.apply(null, latitudes),
+			latMax = Math.max.apply(null, latitudes),
+            lngMin = Math.min.apply(null, longitudes),
+            lngMax = Math.max.apply(null, longitudes);
+        //center.lat = Math.avg(latitudes);
+        center.lat = Math.avg(latMin, latMax);
+		//center.lng = Math.avg(longitudes);
+        center.lng = Math.avg(lngMin, lngMax);
+        // set the center of the map to this new center
+        map.panTo(center);
+        // adjust zoom so as to fixate on the markers
+        var theta = lngMax - lngMin,
+        	phi   = latMax - latMin;
+        console.log('theta == ' + theta + '\nphi == ' + phi);
+        //map.setZoom(Math.floor(Math.log(360 * $('#map').width() / (256 * Math.max(theta, 2 * phi))) / Math.LN2));
+        map.setZoom(Math.floor(Math.log(360 * Math.min($('#map').width() / (256 * theta), $('#map').height() / (256 * 2 * phi))) / Math.LN2));
+    }
+    return center;
+}
+ 
+/* function that determines whether or not a String should be a function (namely, if it is the string form of a function)
+ * Parameters: 
+ *	• str : the string to check
+ * Returns: 
+ *	• true if str should be a function, or false otherwise
+ * NOTE: the primary use for this function is for restoring stringified member functions of objects returned from the server
+ */
+function shouldBeFunction(str)
+{
+	str = str.toString().trim();
+	// str should *not* be function iff it doesn't start with 'function'
+	if (str.indexOf('function') !== 0) return false;
+	// str should *not* be function iff it doesn't have a '(' and a ')'
+	if ((str.indexOf('(') === -1) || (str.indexOf(')') === -1)) return false;
+	// str should *not* be function iff it doesn't have a '{' and a '}'
+	if ((str.indexOf('{') === -1) || (str.indexOf('}') === -1)) return false;
+	return true;
+}
+
+/* reviver function for stringified objects that contain stringified methods 
+ * Parameters : 
+ *	• key   : the key of the object
+ *	• value : the value of object[key]
+ */
+function objectReviver(key, value)
+{ 
+	var DEBUG = false;
+	if ((typeof(value) === 'string') && (shouldBeFunction(value))) {
+		if (DEBUG) {
+			console.log('function string detected on property named : ' + key);
+			console.log('function text: " ' + value + '"');
+		}
+		// get arguments list, if there is one to get
+		var argsList = value.substring(value.indexOf('(') + 1, value.indexOf(')')).trim();
+		if (DEBUG) console.log('argsList == ' + argsList);
+		var functionBody = value.substring(value.indexOf('{') + 1, value.lastIndexOf('}')).trim();
+		if (DEBUG) console.log('functionBody == ' + functionBody);
+		if (argsList) 
+			return new Function(argsList, functionBody);	
+		return new Function(functionBody);
+	}
+	return value;
+}
+
+/* Revives potholeState data member (by including its methods that somehow got stripped away)
+ * Parameters : 
+ *	• pothole : (PotholeData or PotholeDataFromCoords) the object containing POTHOLE_STATE data member
+ * NOTE: if pothole does not contain potholeState data member, this function adds potholeState to pothole 
+ */
+function revivePotholeState(pothole) {
+	pothole.potholeState = getPotholeStateFor(pothole);
+    return pothole;
+}
+
+/* populates legend section of map with available icons and what they stand for
+ */
+function populateLegend() {
+	var DEBUG = false;
+	//$('#legend div:first')
+    // fill legend with all the pothole states
+    for (var key in POTHOLE_STATES) 
+    {
+    	var potholeState = POTHOLE_STATES[key];
+        if (DEBUG)
+        {
+        	console.log(JSON.stringify(potholeState, null, '\t'));
+            console.log('potholeState.toString() == ' + potholeState.toString());
+        }
+        var legendRowTemplate = '<span class="rowTight">' + 
+    		'<img src="{{{iconURL}}}">' + 
+			'<span>{{.}}</span>' + 
+            '</span>';
+        $('#legend div:first').append(Mustache.to_html(legendRowTemplate, potholeState));
+    }
+}
+ 
+/* fetches server pothole data, for later use
+ * Parameters: 
+ *	• data : the data from the server. data should have two members
+ *	 - potholesWithCoords
+ *	 - potholesWithoutCoords
+ *	• callback : the callback function. callback should have at least one argument: 
+ *	 - err : the error object
+ *	 - res : the response data to send forward (to other functions); // won't need this because this function sets global variables
+ */
+function fetchServerPotholeData(data, callback) {
+	var DEBUG = false;
+	// make sure callback is either function or falsy
+    if ((callback) && (typeof callback !== 'function')) throw new Error('callback provided but it is not a function. Thrown from fetchServerPotholeData().');
+    if (DEBUG) console.log('data == ' + data);
+    // if data is string
+    if (data === data.toString())
+    {
+    	// convert it to object with JSON.parse()
+        data = JSON.parse(data, objectReviver);
+    }
+    potholeAddresses   = data.potholesWithoutCoords;
+    potholeCoordinates = data.potholesWithCoords;
+    if (DEBUG) {
+    	console.log('potholeAddresses == ' + JSON.stringify(potholeAddresses, null, '\t'));
+    	console.log('potholeCoordinates == ' + JSON.stringify(potholeCoordinates, null, '\t'));
+    }
+    // if this is being called asynchronously (i.e. with callback), pass potholeAddresses on that way (the next function will need that). else, simply return data
+    if (callback) { 
+    	//callback(null, potholeAddresses, potholeCoordinates);
+        callback(null, data.potholesWithoutCoords, data.potholesWithCoords);
+    }
+    else return data; 
+}
+
+/* function that gets road coordinates for, and writes road coordinates to, all the PotholeData in potholesWithAddress
+ * Parameters:
+ *	• potholesWithAddress    : (Object<Array<PotholeData> > ) a collection of PotholeData that doesn't have coordinates
+ *	• potholesWithCoordinates: (Object<Array<PotholeData> > ) a collection of PotholeData that has coordinates
+ *	• callback               : the next function
+ */
+function fetchCoords(potholesWithAddress, potholesWithCoordinates, callback)
+{
+	var DEBUG = false;
+	// make sure callback is a function
+    if ((callback) && (typeof(callback) !== 'function')) throw new TypeError('callback is something, but not a function. Thrown from fetchCoords().');
+    // if potholesWithAddress empty, there is nothing to do here. Just invoke callback if there is one. 
+    if ((potholesWithAddress.isEmpty()) && (callback)) return callback(null, potholesWithCoordinates);
+    // for each element of potholesWithAddress
+    // TODO: refactor this to make use of that async library
+    var unsnappablePotholes = new PotholeCollectionObject();
+    var keys = [];
+    for (var key in potholesWithCoordinates)
+    {
+    	if (typeof potholesWithCoordinates[key] !== 'function') keys.push(key);
+    }
+    for (var key in potholesWithAddress)
+    {
+    	// TODO: refactor this with async library
+    	(function iterator(k, m) {
+        	if (typeof potholesWithAddress[k] === 'function') return;
+        	if (m == potholesWithAddress[k].length) return;        	
+            var rawCoords, potholeCoords;
+            // potholesWithAddress[k] is array of strings for each k. We convert those strings back into objects
+            // TODO: test each potholesWithAddress[k][m] to verify that it, and everything in it, that shouldn't be a string, isn't
+            var serverPotholeData = potholesWithAddress[k][m];
+        	// get coordinates for the potholes stored there
+            // NOTE: potholes might not be stored by address. You may have to use their PlaceID
+            
+            getGPSCoordinates(serverPotholeData._streetAddress).done(function(response) {
+            	// if there is no results array for serverPotholeData, it's unsnappable
+                //if (!response.results
+            	rawCoords = response.results[0].geometry.location;
+            })
+            
+            .done(function() {
+            	// write rawCoords to serverPotholeData
+                var updatedPotholeData = serverPotholeData;
+                updatedPotholeData.setCoordinates(rawCoords);
+                updatedPotholeData.isSnappedToRoad(false);
+                // updatedPotholeData now has coordinates
+                potholesWithCoordinates[k].push(updatedPotholeData);
+                if ((k === keys[keys.length - 1]) && (m === potholesWithAddress[k].length - 1) && (callback))
+                {
+                	// The Geolocation API returns GPS coordinates for every street address (even if that street address doesn't exist!). Thus, we empty potholeAddresses here
+                    potholeAddresses = new PotholeCollectionObject();
+                	return callback(null, potholesWithCoordinates);
+                }
+            	iterator(k, m+1);
+            })
+            
+        })(key, 0);
+    }
+    if (DEBUG) { 
+    	console.log('potholeAddresses == ' + JSON.stringify(potholeAddresses, null, '\t'));
+        console.log('potholeCoordinates == ' + JSON.stringify(potholeCoordinates, null, '\t'));
+    }
+ }
+
+/* snaps potholes stored in potholeCoordinates to road
+ * Parameters: 
+ *	• potholeCollection : (Object<Array<PotholeData> >) the Collection of PotholeData to use
+ *	• callback          : the function to call next
+ */
+// TODO: refactor the body of this so as to use potholeCollection (preferrably instead of potholeCoordinates)
+function snapPotholeCoordsToRoad(potholeCollection, callback)
+{
+    var DEBUG = false;
+    // guarantee that callback is function
+    if ((callback) && (typeof(callback) !== 'function')) throw new TypeError('callback is something, but not a function. Thrown from snapPotholeCoordsToRoad().');
+    // for each element of potholeCollection
+    if (DEBUG) console.log('potholeCollection === ' + JSON.stringify(potholeCollection, null, '\t'));
+    var keys = [];
+    for (var key in potholeCollection)
+    {
+    	if (typeof potholeCollection[key] !== 'function') keys.push(key);
+    }
+    for (var key in potholeCollection)
+    {
+        (function itr(k, m) { 
+        	if (typeof potholeCollection[k] === 'function') return;
+            if (m === potholeCollection[k].length) return;
+            if (DEBUG) console.log('potholeCollection.' + k + '[' + m + '] == ' + JSON.stringify(potholeCollection[k][m], null, '\t'));
+            // if element (PotholeData) not snapped to road
+            if (!potholeCollection[k][m].isSnappedToRoad())
+            {
+                // get road coordinates for element
+                getRoadCoordinates(potholeCollection[k][m])
+                // replace element's coordinates with those road coordinates
+                .done(function(newCoords) { 
+                    potholeCollection[k][m].setCoordinates(newCoords.snappedPoints[0].location);
+                    //debugger;
+                    potholeCollection[k][m].isSnappedToRoad(true);
+                    if (DEBUG) console.log('potholeCollection.' + k + '[' + m + '] == ' + JSON.stringify(potholeCollection[k][m], null, '\t'));
+                    if ((k === keys[keys.length - 1]) && (m === potholeCollection[k].length - 1) && (callback)) return callback(null, null, potholeCollection);
+                    itr(k, m+1);
+                })
+            }
+            else
+            {
+            	if ((k === keys[keys.length - 1]) && (m === potholeCollection[k].length - 1) && (callback)) return callback(null, null,  potholeCollection);
+                itr(k, m+1);
+            }
+        })(key, 0);
+    }
+}
+
+// TODO: refactor this
+/* put all potholes on the map 
+ * Parameters:
+ *	• callback         : the function to call next
+ *	• unsnappedPotholes: (<Object<Array<PotholeData> > ) collection of potholes with coordinates that have not been snapped to road
+ *	• snappedPotholes  : (<Object<Array<PotholeData> > ) collection of potholes with coordinates that are snapped to road
+ */
+function addPotholeMarkers(unsnappedPotholes, snappedPotholes, callback)
+{
+	var DEBUG = false;
+	// guarantee that callback is function
+	if ((callback) && (typeof(callback) !== 'function')) throw new TypeError('callback is something, but not a function. Thrown from addPotholeMarkers().');
+    // add all the markers for them to the map
+    async.waterfall([
+    	function(cb) { 
+        	async.eachOf(unsnappedPotholes, function(value, key) {
+            	// TODO: refactor this
+        		async.eachOf(value, function (v, k) { 
+                	if (DEBUG) console.log('dealing with unsnappedPotholes');
+                	//console.assert(v.potholeState.toString() != '[object Object]', 'toString() override missing');
+                    //v = revivePotholeState(v); // unnecessary, because addPotholeMarker() invokes getPotholeStateFor() to force the potholeState to be in the statesMap
+            		addPotholeMarker(v, false);
+            	})
+        	})
+            cb(null);
+        }, function(cb) {
+            async.eachOf(snappedPotholes, function(value, key) { 
+            	async.eachSeries(value, function(pothole, fn) { 
+                	if (DEBUG) console.log('pothole == ' + JSON.stringify(pothole, null, '\t'));
+                    addPotholeMarker(pothole, 
+                    	true,
+                        //pothole.isSnappedToRoad(),
+                        fn); 
+                })
+            })
+            cb(null);
+        }], function(err, results) {
+        	console.log('trying to center map');
+            
+            adjustMap();
+            console.log('Map recentered');
+            if (callback) { 
+    			callback(err);
+    		}
+        });
+    
+    
+}
+
+$(document).ready(function() {
+	map = new google.maps.Map(document.getElementById('map'), defaultMapOptions);	// the Google Maps API requires elements to be specified via native JavaScript
+    // populate the icons section of the legend with the available icons and states
+    populateLegend();
+    // implement toggle feature on click
+    $('#toggleHidden').click(function(e) {
+    	// if legend is hidden
+        if ($('#legend').css('display') === 'none')
+        {
+        	// show it (from the top right corner)
+            $('#legend').show("scale", { origin: [ 'top', 'right' ]});
+            // change icon of #toggleHidden to &mdash;
+            $('#toggleHidden').html('&mdash;');
+        }
+        // else 
+        else
+        {
+        	// hide it (to the top right corner)
+            $('#legend').hide("scale", { origin : ['top', 'right' ]});
+            // change icon of #toggleHidden to '+'
+            $('#toggleHidden').html('+');
+        }
+    	e.preventDefault();
+    });
+    // get pothole data from the server; // NOTE: PotholeData objects will be sent from server as strings
+    // TODO: pass in a success callback that invokes async.waterfall()
+    google.script.run.withSuccessHandler(function(data) { 
+    	async.waterfall([//fetchServerPotholeData,	// for some reason, this function is not receiving data
+        	function(callback) { 
+            	fetchServerPotholeData(data, callback);
+            },
+        	fetchCoords,
+            snapPotholeCoordsToRoad,
+            addPotholeMarkers
+            ], function(err, result) { 
+            	if (!err) { 
+                	console.log('result == ' + result);
+                    console.log('Everything successfully done. Enjoy your map!'); 
+                    
+                }
+                else 
+                {
+                	console.error(err);
+                }
+            }
+    	)
+        /*fetchServerPotholeData(data);
+        fetchCoords();
+        snapPotholeCoordsToRoad();
+        addPotholeMarkers();
+        adjustMap();*/
+    }).withFailureHandler(console.log).getPotholeData();
+    
+});   
+</script>
+
+
