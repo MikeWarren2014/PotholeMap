@@ -1,5 +1,5 @@
-<script>
-var API_KEY = "[your Google Maps API key here]";
+<script defer>
+var API_KEY = 'AIzaSyCcjfkPZ0EfqZnyJrOZ3cuqdAWTFlXmFxM'; // TODO: move this some place else
 // Icons for markers
 /* obtained from tutorial https://developers.google.com/maps/documentation/roads/inspector */
 var RED_MARKER    = 'https://maps.google.com/mapfiles/ms/icons/red-dot.png';
@@ -255,6 +255,23 @@ function addPotholeMarker(potholeData, snappedToRoad, callback) {
   return marker;
 }
 
+/** adds pothole markers with timeout 
+ * Parameters:
+ *	• potholeData  : a PotholeData (or PotholeDataFromCoords) object
+ *	• snappedToRoad: boolean
+ *	• callback     : the function to call next (optional)
+ * Returns : 
+ *	• the marker that was added to the map, or null if arguments invalid, or callback() if it was provided
+ */
+function addPotholeMarkerWithTimeout(potholeData, snappedToRoad, callback)
+{
+    addPotholeMarkerWithTimeout.timeout += addPotholeMarkerWithTimeout.timeInterval;
+    setTimeout(function() { 
+        addPotholeMarker(potholeData, snappedToRoad, callback)
+    }, addPotholeMarkerWithTimeout.timeout);
+}
+if (addPotholeMarkerWithTimeout.timeout === undefined) addPotholeMarkerWithTimeout.timeout = 0;
+addPotholeMarkerWithTimeout.timeInterval = 20; // add pothole marker every 20 seconds
 /* Creates InfoWindow for potholeData 
  * Parameters:
  *	• potholeData : the data to use for the template
@@ -649,6 +666,12 @@ function addPotholeMarkers(unsnappedPotholes, snappedPotholes, callback)
 	var DEBUG = false;
 	// guarantee that callback is function
 	if ((callback) && (typeof(callback) !== 'function')) throw new TypeError('callback is something, but not a function. Thrown from addPotholeMarkers().');
+    // if #loadingScreen is still up, shut it down
+    if ($('#loadingScreen').hasClass('loading')) 
+    {
+        $('#loadingScreen').removeClass('loading');
+        $('#loadingScreen *').addClass('hidden');
+    }
     // add all the markers for them to the map
     async.waterfall([
     	function(cb) { 
@@ -687,6 +710,9 @@ function addPotholeMarkers(unsnappedPotholes, snappedPotholes, callback)
 }
 
 $(document).ready(function() {
+//function initMap() {
+    let DEBUG = false;
+    if (DEBUG) console.log('started...');
 	map = new google.maps.Map(document.getElementById('map'), defaultMapOptions);	// the Google Maps API requires elements to be specified via native JavaScript
     // populate the icons section of the legend with the available icons and states
     populateLegend();
@@ -720,6 +746,7 @@ $(document).ready(function() {
         	fetchCoords,
             snapPotholeCoordsToRoad,
             addPotholeMarkers
+            // addPotholeMarkerWithTimeout
             ], function(err, result) { 
             	if (!err) { 
                 	console.log('result == ' + result);
@@ -738,7 +765,7 @@ $(document).ready(function() {
         addPotholeMarkers();
         adjustMap();*/
     }).withFailureHandler(console.log).getPotholeData();
-    
+//}  
 });   
 </script>
 
