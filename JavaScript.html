@@ -614,7 +614,7 @@ function fetchCoords(potholesWithAddress, potholesWithCoordinates, callback)
 // TODO: refactor the body of this so as to use potholeCollection (preferrably instead of potholeCoordinates)
 function snapPotholeCoordsToRoad(potholeCollection, callback)
 {
-    var DEBUG = false;
+    var DEBUG = true;
     // guarantee that callback is function
     if ((callback) && (typeof(callback) !== 'function')) throw new TypeError('callback is something, but not a function. Thrown from snapPotholeCoordsToRoad().');
     // for each element of potholeCollection

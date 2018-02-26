@@ -30,6 +30,7 @@ function DataStoreHelper() {
   }
 }
 // static const strings
+DataStoreHelper.POTHOLE_NUMBER  = 'number';
 DataStoreHelper.LATITUDE        = 'latitude';
 DataStoreHelper.LONGITUDE       = 'longitude';
 DataStoreHelper.ADDRESS         = 'address';

@@ -1,6 +1,7 @@
 /* Creates PotholeData object 
  *
  * Parameters:
+ *  • id            : integer
  *	• latitude      : number (or null)
  *	• longitude     : number (or null)
  *	• snappedToRoad : boolean
@@ -22,12 +23,17 @@
  *		-NOTE: if no parameters have been specified, function simply returns this._snappedToRoad
  */
 // TODO: implement way to check for string first or second argument
-function PotholeData(latitude, longitude, snappedToRoad, filled, surfaceArea, bagsNeeded, imageURL)
-{
+function PotholeData(id, latitude, longitude, snappedToRoad, filled, surfaceArea, bagsNeeded, imageURL) {
+  if ((isNaN(Number(latitude))) || (isNaN(Number(longitude)))) {
+    throw new TypeError(
+      "Expected latitude,longitude to be number, but got address instead. Thrown from PotholeData constructor");
+  }
+
+  this._id = parseInt(id) || 0;
   this._streetAddress = '';
   this._snappedToRoad = snappedToRoad || false;  // assume coordinates have not been snapped to road
-  this.lat = latitude;
-  this.lng = longitude;
+  this.lat = Number(latitude);
+  this.lng = Number(longitude);
   // For good measure, we give this latitude,longitude members
   this.latitude = this.lat;
   this.longitude= this.lng;
@@ -38,7 +44,15 @@ function PotholeData(latitude, longitude, snappedToRoad, filled, surfaceArea, ba
   this.imageURL = imageURL;
   
   this.potholeState = getPotholeStateFor(this);
-  // methods
+  // methods. in here, instead of as members of PotholeData.prototype, so that, when JSON.stringify happens, 
+  // they are sent to client. 
+  this.isSnappedToRoad =  function(snapped) { 
+    if (snapped === undefined) return this._snappedToRoad;
+    // make sure snapped is boolean at this point
+    snapped = !(!(snapped));
+    this._snappedToRoad = snapped;
+  }
+
   this.setCoordinates = function(coordinateOrLatitude, longitude) { 
     // if coordinateOrLatitude is a coordinates object
     if ((coordinateOrLatitude.lat !== undefined) || (coordinateOrLatitude.latitude !== undefined)) {
@@ -47,28 +61,29 @@ function PotholeData(latitude, longitude, snappedToRoad, filled, surfaceArea, ba
       this.lng = Number(coordinateOrLatitude.lng) || Number(coordinateOrLatitude.longitude);
     }
     // otherwise, we assume it's a number and use it and longitude to set those members
-    else
-    {
+    else {
       this.lat = coordinateOrLatitude;
       this.lng = longitude;
     }
     this.latitude = this.lat;
     this.longitude = this.lng;
   };
-  this.setStreetAddress = function(address) { 
-    this._streetAddress = address;
-  }
-  this.isSnappedToRoad = function(snapped) { 
-    if (snapped === undefined) return this._snappedToRoad;
-    // make sure snapped is boolean at this point
-    snapped = !(!(snapped));
-    this._snappedToRoad = snapped;
-  }
+
   // for the Mustache.js rendering. Computes volume of this in cubic feet. 1 bag needed == 5/12 cubic foot
   this.volume = function() { return this.bagsNeeded * 5/12; };
 }
+// methods 
+PotholeData.prototype.setID = function (id) { 
+  this._id = id;
+}
+
+PotholeData.prototype.setStreetAddress = function(address) { 
+  this._streetAddress = address;
+}
+
+
 /* Checks whether or not a provided coordinate is valid
- * Parameters: 
+* Parameters: 
  *	• coord      : (number) the coordinate to check 
  *	• isLatitude : (boolean) whether or not this coordinate is a latitude
  * Returns:
